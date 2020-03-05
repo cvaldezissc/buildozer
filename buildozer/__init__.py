@@ -6,7 +6,7 @@ Generic Python packager for Android / iOS. Desktop later.
 
 '''
 
-__version__ = '0.40.dev0'
+__version__ = '1.0.1-dev0'
 
 import os
 import re
@@ -26,10 +26,10 @@ from fnmatch import fnmatch
 
 from pprint import pformat
 
-try:
+try:  # Python 3
     from urllib.request import FancyURLopener
     from configparser import SafeConfigParser
-except ImportError:
+except ImportError:  # Python 2
     from urllib import FancyURLopener
     from ConfigParser import SafeConfigParser
 try:
@@ -143,14 +143,6 @@ class Buildozer(object):
         except Exception:
             pass
 
-        build_dir = self.config.getdefault('buildozer', 'builddir', None)
-        if build_dir:
-            # for backwards compatibility, append .buildozer to builddir
-            build_dir = join(build_dir, '.buildozer')
-        self.build_dir = self.config.getdefault('buildozer', 'build_dir', build_dir)
-
-        if self.build_dir:
-            self.build_dir = realpath(join(self.root_dir, self.build_dir))
         self.user_bin_dir = self.config.getdefault('buildozer', 'bin_dir', None)
         if self.user_bin_dir:
             self.user_bin_dir = realpath(join(self.root_dir, self.user_bin_dir))
@@ -327,7 +319,7 @@ class Buildozer(object):
                     ret_stdout.append(chunk)
                 if show_output:
                     if IS_PY3:
-                        stderr.write(chunk.decode('utf-8', 'replace'))
+                        stdout.write(chunk.decode('utf-8', 'replace'))
                     else:
                         stdout.write(chunk)
             if fd_stderr in readx:
@@ -342,8 +334,8 @@ class Buildozer(object):
                     else:
                         stderr.write(chunk)
 
-        stdout.flush()
-        stderr.flush()
+            stdout.flush()
+            stderr.flush()
 
         process.communicate()
         if process.returncode != 0 and break_on_error:
@@ -781,7 +773,7 @@ class Buildozer(object):
                 for exclude_dir in exclude_dirs:
                     if exclude_dir[-1] != '/':
                         exclude_dir += '/'
-                    if filtered_root.startswith(exclude_dir):
+                    if filtered_root.startswith(exclude_dir.lower()):
                         is_excluded = True
                         break
 
@@ -880,9 +872,26 @@ class Buildozer(object):
         return realpath(dirname(self.specfilename))
 
     @property
+    def user_build_dir(self):
+        """The user-provided build dir, if any."""
+        # Check for a user-provided build dir
+        # Check the (deprecated) builddir token, for backwards compatibility
+        build_dir = self.config.getdefault('buildozer', 'builddir', None)
+        if build_dir is not None:
+            # for backwards compatibility, append .buildozer to builddir
+            build_dir = join(build_dir, '.buildozer')
+        build_dir = self.config.getdefault('buildozer', 'build_dir', build_dir)
+
+        if build_dir is not None:
+            build_dir = realpath(join(self.root_dir, build_dir))
+
+        return build_dir
+
+    @property
     def buildozer_dir(self):
-        if self.build_dir:
-            return self.build_dir
+        '''The directory in which to run the app build.'''
+        if self.user_build_dir is not None:
+            return self.user_build_dir
         return join(self.root_dir, '.buildozer')
 
     @property
@@ -1106,6 +1115,23 @@ class Buildozer(object):
             if not exists(self.global_buildozer_dir):
                 return
             rmtree(self.global_buildozer_dir)
+
+    def cmd_appclean(self, *args):
+        '''Clean the .buildozer folder in the app directory.
+
+        This command specifically refuses to delete files in a
+        user-specified build directory, to avoid accidentally deleting
+        more than the user intends.
+        '''
+        if self.user_build_dir is not None:
+            self.error(
+                ('Failed: build_dir is specified as {} in the buildozer config. `appclean` will '
+                 'not attempt to delete files in a user-specified build directory.').format(self.user_build_dir))
+        elif exists(self.buildozer_dir):
+            self.info('Deleting {}'.format(self.buildozer_dir))
+            rmtree(self.buildozer_dir)
+        else:
+            self.error('{} already deleted, skipping.'.format(self.buildozer_dir))
 
     def cmd_help(self, *args):
         '''Show the Buildozer help.
